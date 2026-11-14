@@ -1,0 +1,123 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>PoseLab AI – Gesture & Expression Analyzer</title>
+<style>
+:root{--bg:#0b1020;--p:#151c33;--t:#e8ecf8;--m:#8b95b5;--a:#5eead4;--w:#fbbf24}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--t);font:15px system-ui,sans-serif;min-height:100vh;padding:env(safe-area-inset-top) 14px env(safe-area-inset-bottom)}
+.wrap{max-width:720px;margin:0 auto;padding:14px 0}h1{font-size:20px;margin:6px 0}.m{color:var(--m)}
+.card{background:var(--p);border-radius:16px;padding:16px;margin:12px 0}
+button{background:var(--a);color:#042;border:0;border-radius:12px;padding:13px 20px;font-weight:700;font-size:16px;width:100%}
+.stage{position:relative;border-radius:16px;overflow:hidden;background:#000;aspect-ratio:3/4;max-height:70vh;margin:0 auto}
+video,canvas.ov{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}video#cam{transform:scaleX(-1)}
+.scan{position:absolute;left:0;right:0;height:3px;background:linear-gradient(90deg,transparent,var(--a),transparent);animation:s 2.4s linear infinite}
+@keyframes s{from{top:0}to{top:100%}}
+.rec{position:absolute;top:10px;right:10px;font-size:11px;background:#0008;padding:4px 8px;border-radius:99px}.rec:before{content:"● ";color:#f43}
+.cd{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:96px;font-weight:800;text-shadow:0 0 30px #000}
+.bar{height:6px;background:#263052;border-radius:9px;overflow:hidden;margin:8px 0}.bar i{display:block;height:100%;width:0;background:var(--a);transition:width .2s}
+.chips{display:flex;gap:6px;flex-wrap:wrap;font-size:12px}.chip{padding:4px 9px;border-radius:99px;background:#263052;color:var(--m)}.chip.on{background:#0f4a43;color:var(--a)}
+#st{font-weight:700;min-height:22px}.hide{display:none!important}
+video#res{width:100%;border-radius:16px;max-height:72vh;background:#000}
+</style></head><body><div class="wrap">
+<h1>PoseLab AI <span class="m" style="font-size:13px">gesture &amp; expression analyzer</span></h1>
+
+<section id="s0" class="card"><p>Run a short on-device calibration of your hand, finger and facial tracking. It takes about a minute. Stand back so your head, shoulders and both hands are visible.</p>
+<p class="m" style="font-size:13px">Your camera is used and the session is <b>recorded</b> locally in your browser. Nothing is uploaded.</p><button id="go">Start calibration</button><p id="err" class="m"></p></section>
+
+<section id="s1" class="hide">
+<div class="stage"><video id="cam" playsinline muted></video><canvas class="ov" id="ov"></canvas><div class="scan"></div><div class="rec">REC</div><div class="cd" id="cd"></div></div>
+<div class="card"><div class="m" id="stp">Step</div><div style="font-size:19px;font-weight:700" id="ins"></div><div class="bar"><i id="pb"></i></div><div id="st"></div>
+<div class="chips" style="margin-top:8px"><span class="chip" id="cH">Hands</span><span class="chip" id="cF">Face</span><span class="chip" id="cG">Gesture</span><span class="chip" id="cP">Position</span></div></div></section>
+
+<section id="s2" class="card hide"><b>Generating analysis report…</b><div class="bar"><i id="rb"></i></div><p class="m" id="rt">Compiling landmark data</p></section>
+<section id="s3" class="hide"><div class="card"><b>Your result 💖</b></div><video id="res" controls playsinline></video><div class="card"><button id="dl">Download video</button></div></section>
+</div>
+<script type="module">
+import {FilesetResolver,HandLandmarker,FaceLandmarker} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+const $=id=>document.getElementById(id);
+/* ================= CHOREOGRAPHY (CONFIGURE ME) =================
+ The reference video was not available, so these steps are PLACEHOLDERS, not a verified copy of the trend.
+ Edit/reorder: each step = visible instruction + a real detection test on live tracking data.
+ S.f = face {cx,cy,w,roll,yaw,bs}; S.h = hands [{x,y,ext}] (x is mirrored, 0=left of screen). */
+const two=()=>S.h.length>=2, avgx=()=>S.h.reduce((a,h)=>a+h.x,0)/S.h.length;
+const nearFace=h=>Math.abs(h.x-S.f.cx)<S.f.w*1.3&&Math.abs(h.y-S.f.cy)<S.f.w*1.1;
+const STEPS=[
+{ins:"Center your face in the frame",fail:"Analyzing face position…",ok:()=>S.f&&Math.abs(S.f.cx-.5)<.12},
+{ins:"Place both hands on the left side",fail:()=>S.h.length<2?"Show both hands":"Adjust your hands slightly left",ok:()=>S.f&&two()&&avgx()<.42},
+{ins:"Bring both hands beside your cheeks",fail:()=>two()?"Adjust your left hand slightly":"Show both hands",ok:()=>S.f&&two()&&S.h.every(nearFace)},
+{ins:"Show a natural smile",fail:"Analyzing smile…",ok:()=>S.f&&(S.f.bs.mouthSmileLeft+S.f.bs.mouthSmileRight)/2>.45},
+{ins:"Raise your eyebrows, try a surprised look",fail:"Analyzing expression…",ok:()=>S.f&&S.f.bs.browInnerUp>.4&&S.f.bs.jawOpen>.25},
+{ins:"Slightly tilt your head",fail:"Measuring head angle…",ok:()=>S.f&&Math.abs(S.f.roll)>.09},
+{ins:"Move your hands toward the center",fail:"Keep your fingers together",ok:()=>S.f&&two()&&Math.abs(avgx()-.5)<.1},
+{ins:"Try a small pout",fail:"Analyzing mouth shape…",ok:()=>S.f&&S.f.bs.mouthPucker>.35},
+{ins:"Move your hands to the right side",fail:()=>two()?"Adjust your hands slightly right":"Show both hands",ok:()=>S.f&&two()&&avgx()>.58},
+{ins:"Spread all fingers and look at the camera",fail:"Analyzing finger alignment…",ok:()=>S.f&&S.h.length>0&&S.h.every(h=>h.ext>=4)&&Math.abs(S.f.yaw)<.15}
+];
+const HOLD=600, TIMEOUT=9000; // ms stable to pass / ms before auto-advance (so it never stalls)
+
+let S={f:null,h:[]},hand,face,stream,rec,chunks=[],log=[],t0=0,running=false,rawBlob,mime="";
+const d=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+async function load(){const fs=await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+ const g="https://storage.googleapis.com/mediapipe-models/";
+ hand=await HandLandmarker.createFromOptions(fs,{baseOptions:{modelAssetPath:g+"hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",delegate:"GPU"},runningMode:"VIDEO",numHands:2});
+ face=await FaceLandmarker.createFromOptions(fs,{baseOptions:{modelAssetPath:g+"face_landmarker/face_landmarker/float16/1/face_landmarker.task",delegate:"GPU"},runningMode:"VIDEO",outputFaceBlendshapes:true,numFaces:1});}
+$("go").onclick=async()=>{$("go").disabled=true;$("err").textContent="Requesting camera & loading models…";
+ try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"user",width:{ideal:1280},height:{ideal:720}},audio:true});}
+ catch(e){try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"user"}});}catch(e2){$("err").textContent="Camera permission is required.";$("go").disabled=false;return;}}
+ try{await load();}catch(e){$("err").textContent="Could not load tracking models (needs internet + https). "+e.message;$("go").disabled=false;return;}
+ $("s0").classList.add("hide");$("s1").classList.remove("hide");const v=$("cam");v.srcObject=stream;await v.play();start();};
+
+function start(){mime=["video/webm;codecs=vp9,opus","video/webm;codecs=vp8,opus","video/webm","video/mp4"].find(m=>MediaRecorder.isTypeSupported(m))||"";
+ rec=new MediaRecorder(stream,mime?{mimeType:mime}:{});rec.ondataavailable=e=>e.data.size&&chunks.push(e.data);rec.start(500);t0=performance.now();running=true;loop();run();}
+
+let lastT=-1;
+function loop(){if(!running)return;const v=$("cam");
+ if(v.readyState>=2&&v.currentTime!==lastT){lastT=v.currentTime;const ts=performance.now();
+  const hr=hand.detectForVideo(v,ts),fr=face.detectForVideo(v,ts+1);
+  S.h=(hr.landmarks||[]).map(l=>{const w=l[0];let e=0;[[8,6],[12,10],[16,14],[20,18]].forEach(([t,p])=>{if(d(l[t],w)>d(l[p],w)*1.1)e++});if(d(l[4],l[17])>d(l[3],l[17])*1.05)e++;return{x:1-l[9].x,y:l[9].y,ext:e,l}});
+  const L=fr.faceLandmarks&&fr.faceLandmarks[0];
+  if(L){const a=L[234],b=L[454],w=Math.abs(b.x-a.x),bs={};fr.faceBlendshapes[0].categories.forEach(c=>bs[c.categoryName]=c.score);
+   S.f={cx:1-(a.x+b.x)/2,cy:(L[10].y+L[152].y)/2,top:L[10].y,w,roll:(L[263].y-L[33].y)/w,yaw:(L[1].x-(a.x+b.x)/2)/w,bs};
+   log.push({t:ts-t0,cx:S.f.cx,top:S.f.top,w:S.f.w});}else S.f=null;
+  draw();}
+ requestAnimationFrame(loop);}
+function draw(){const c=$("ov"),x=c.getContext("2d"),r=c.getBoundingClientRect();c.width=r.width;c.height=r.height;
+ const v=$("cam"),sc=Math.max(r.width/v.videoWidth,r.height/v.videoHeight),ow=(r.width-v.videoWidth*sc)/2,oh=(r.height-v.videoHeight*sc)/2;
+ const P=(nx,ny)=>[(1-nx)*0+(nx*v.videoWidth)*sc+ow,ny*v.videoHeight*sc+oh]; // nx already mirrored
+ x.fillStyle="#5eead4";S.h.forEach(h=>h.l.forEach(p=>{const[a,b]=P(1-p.x,p.y);x.beginPath();x.arc(a,b,3,0,7);x.fill()}));
+ if(S.f){x.strokeStyle="#5eead4";x.lineWidth=2;const[a,b]=P(S.f.cx,S.f.cy),R=S.f.w*v.videoWidth*sc*.8;x.beginPath();x.ellipse(a,b,R*.8,R,0,0,7);x.stroke();}
+ $("cH").classList.toggle("on",S.h.length>0);$("cF").classList.toggle("on",!!S.f);$("cG").classList.toggle("on",S.h.some(h=>h.ext>=3));$("cP").classList.toggle("on",!!S.f&&Math.abs(S.f.cx-.5)<.2);}
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+async function run(){for(let i=0;i<STEPS.length;i++){const s=STEPS[i];$("stp").textContent=`Calibration ${i+1} of ${STEPS.length}`;$("ins").textContent=s.ins;$("st").textContent="";
+  for(const n of [2,1]){$("cd").textContent=n;await sleep(600);}$("cd").textContent="";
+  let hold=0,st=performance.now(),last=st;
+  while(performance.now()-st<TIMEOUT){await sleep(80);const n=performance.now(),dt=n-last;last=n;let ok=false;try{ok=!!s.ok();}catch(e){}
+   hold=ok?hold+dt:0;const f=typeof s.fail==="function"?s.fail():s.fail;$("st").textContent=ok?(hold>HOLD?"Perfect! Position locked.":"Hand positioning detected."):f;
+   $("pb").style.width=((i+Math.min(1,hold/HOLD))/STEPS.length*100)+"%";if(hold>HOLD)break;}
+  await sleep(500);}
+ $("pb").style.width="100%";await finish();}
+async function finish(){running=false;await sleep(400);const done=new Promise(r=>rec.onstop=r);rec.stop();await done;stream.getTracks().forEach(t=>t.stop());
+ rawBlob=new Blob(chunks,{type:mime||"video/webm"});$("s1").classList.add("hide");$("s2").classList.remove("hide");
+ const msgs=["Compiling landmark data","Scoring finger alignment","Rendering report"];let k=0;const iv=setInterval(()=>{$("rt").textContent=msgs[k++%3]},1500);
+ try{await render();}catch(e){$("rt").textContent="Render failed: "+e.message;clearInterval(iv);return;}clearInterval(iv);}
+
+/* ===== pink hearts edit rendered onto the real recording ===== */
+function heart(c,x,y,s,a,col){c.save();c.translate(x,y);c.rotate(a);c.scale(s,s);c.fillStyle=col;c.beginPath();c.moveTo(0,.4);c.bezierCurveTo(-1.2,-.4,-.6,-1.1,0,-.5);c.bezierCurveTo(.6,-1.1,1.2,-.4,0,.4);c.fill();c.restore();}
+async function render(){const v=document.createElement("video");v.src=URL.createObjectURL(rawBlob);v.playsInline=true;
+ await new Promise(r=>v.onloadedmetadata=r);const W=v.videoWidth,H=v.videoHeight,cv=document.createElement("canvas");cv.width=W;cv.height=H;const c=cv.getContext("2d");
+ const out=cv.captureStream(30);try{await v.play();v.pause();v.currentTime=0;v.volume=1;}catch(e){}
+ const ms=["video/webm;codecs=vp9,opus","video/webm","video/mp4"].find(m=>MediaRecorder.isTypeSupported(m))||"";
+ let vs;try{vs=v.captureStream?v.captureStream():null;vs&&vs.getAudioTracks().forEach(t=>out.addTrack(t));}catch(e){}
+ const ch=[],mr=new MediaRecorder(out,ms?{mimeType:ms}:{});mr.ondataavailable=e=>e.data.size&&ch.push(e.data);
+ const rnd=n=>{const s=Math.sin(n*127.1)*43758.5;return s-Math.floor(s)},cols=["#ff8fc7","#ff5fae","#ffc2e2","#ff3d9a"];
+ const total=v.duration&&isFinite(v.duration)?v.duration:(log.length?log[log.length-1].t/1000:30);let idx=0;
+ const frame=()=>{const t=v.currentTime*1000;c.save();c.translate(W,0);c.scale(-1,1);c.drawImage(v,0,0,W,H);c.restore();
+  c.fillStyle="rgba(255,130,190,.14)";c.fillRect(0,0,W,H);
+  const g=c.createRadialGradient(W/2,H/2,H*.35,W/2,H/2,H*.8);g.addColorStop(0,"#0000");g.addColorStop(1,"rgba(255,80,160,.35)");c.fillStyle=g;c.fillRect(0,0,W,H);
+  for(let i=0;i<36;i++){const sp=40+rnd(i)*90,y=H+60-((t/1000*sp+rnd(i+9)*H*1.5)%(H+120)),x=rnd(i+3)*W+Math.sin(t/700+i)*25;heart(c,x,y,(.025+rnd(i+5)*.03)*H,Math.sin(t/500+i)*.4,cols[i%4]);}
+  while(idx<log.length-1&&log[idx+1].t<t)idx++;const f=log[idx];
+  if(f){const fx=f.cx*W,fy=f.top*H,R=f.w*W;for(let i=0;i<9;i++){const a=t/900+i*Math.PI*2/9,px=fx+Math.cos(a)*R*.9,py=fy+R*.9+Math.sin(a)*R*.75-R*.3;
+    heart(c,px,py,R*(.16+.05*Math.sin(t/250+i)),a,cols[i%4]);}heart(c,fx,fy-R*.35,R*.3*(1+.08*Math.sin(t/200)),0,"#ff3d9a");}
+  $("rb").style.width=Math.min(100,v.currentTime/total*100)+"%";if(!v.ended&&mr.state!=="inactive")requestAnimationFrame(frame);};
+ mr.start();v.onended=()=>mr.stop();await v.play().catch(async()=>{v.muted=true;await v.play();});frame();
+ await new Promise(r=>mr.onstop=r);const fb=new Blob(ch,{type:ms||"video/webm"}),url=URL.createObjectURL(fb);
+ $("s2").classList.add("hide");$("s3").classList.remove("hide");$("res").src=url;
+ $("dl").onclick=()=>{const a=document.createElement("a");a.href=url;a.download="result."+(fb.type.includes("mp4")?"mp4":"webm");a.click();};}
+</script></body></html>
